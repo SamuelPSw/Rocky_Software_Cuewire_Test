@@ -12,6 +12,7 @@ export type Session = {
   paid: number
   balance: number
   remindedAt: string | null
+  notes: { text: string; revision: string } | null
 }
 
 export type Handout = { id: number; name: string; size: number }

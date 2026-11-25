@@ -43,6 +43,10 @@ nav button.selected { background: #e4ebfd; color: #21439b; }
 .date-tile strong { font-size: 1.25rem; }
 .badge { background: #eaf0fc; color: #29488c; padding: 4px 8px; border-radius: 6px; font-size: .875rem; font-weight: 700; }
 .badge.muted { background: #eef1f6; color: #485568; }
+.note-count { margin-left: 6px; }
+.notes-form, .lesson-notes { margin-top: 14px; }
+.notes-form textarea { width: 100%; padding: 9px 11px; border: 1px solid #c8d2e2; border-radius: 8px; font: inherit; resize: vertical; }
+.lesson-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
 .feedback { padding: 11px 14px; margin-bottom: 12px; border-radius: 8px; background: #e9f4ed; color: #225737; }
 .feedback.error { background: #fceceb; color: #902c28; }
 .reminders { border-color: #b8caf5; background: #f1f5ff; }
