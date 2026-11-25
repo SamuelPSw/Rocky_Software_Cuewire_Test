@@ -13,6 +13,8 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.UUID;
 
 @Service
 @Transactional
@@ -72,6 +74,22 @@ public class LessonService {
             throw conflict("This session has no outstanding balance.");
         }
         lesson.remindedAt = Instant.now();
+        return view(lesson);
+    }
+
+    public LessonView shareNotes(long id, String text) {
+        Lesson lesson = active(id);
+        if (!lesson.completedAt(Instant.now())) {
+            throw conflict("Lesson notes can be shared after the session ends.");
+        }
+        if (text == null || text.isBlank() || text.strip().length() > 5000) {
+            throw bad("Enter lesson notes of 1 to 5000 characters.");
+        }
+        String notes = text.strip();
+        if (!Objects.equals(lesson.notes, notes)) {
+            lesson.notes = notes;
+            lesson.notesRevision = UUID.randomUUID().toString();
+        }
         return view(lesson);
     }
 
@@ -138,8 +156,10 @@ public class LessonService {
     }
 
     private static LessonView view(Lesson l) {
+        LessonNotes notes = l.notes != null && l.completedAt(Instant.now())
+            ? new LessonNotes(l.notes, l.notesRevision) : null;
         return new LessonView(l.id, l.subject, l.startsAt, l.minutes, l.hourlyRate, l.zoomUrl,
-            l.cancelled, l.fee(), l.paid, l.balance(), l.remindedAt);
+            l.cancelled, l.fee(), l.paid, l.balance(), l.remindedAt, notes);
     }
 
     private static ResponseStatusException bad(String message) {

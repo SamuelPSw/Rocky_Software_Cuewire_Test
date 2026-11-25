@@ -13,8 +13,14 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -57,13 +63,50 @@ class TutoringApiTest {
         mvc.perform(post(path + "/reminder").header(ROLE, "TUTOR"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.remindedAt").isNotEmpty());
         mvc.perform(get(SESSIONS).header(ROLE, "FAMILY"))
-            .andExpect(status().isOk()).andExpect(jsonPath("$[0].remindedAt").isNotEmpty());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.id == " + id + ")].remindedAt", hasSize(1)));
         mvc.perform(post(path + "/cancel").header(ROLE, "TUTOR")).andExpect(status().isConflict());
         mvc.perform(put(path + "/payment").header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
             .content("{\"amount\":0}")).andExpect(status().isOk());
         mvc.perform(post(path + "/cancel").header(ROLE, "TUTOR"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.cancelled").value(true))
             .andExpect(jsonPath("$.balance").value(0.0));
+    }
+
+    @Test
+    void familyReadsPublishedNotesOnlyForCompletedSessions() throws Exception {
+        String text = "Practised factoring.\nReview exercise 3.";
+        String notes = mapper.writeValueAsString(Map.of("text", text));
+        String past = Instant.now().minus(1, ChronoUnit.DAYS).toString();
+        var created = mvc.perform(post(SESSIONS).header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
+            .content(INPUT.replace("2027-01-01T15:00:00Z", past)))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.notes").doesNotExist()).andReturn();
+        long id = mapper.readTree(created.getResponse().getContentAsString()).get("id").asLong();
+        String path = SESSIONS + "/" + id;
+        mvc.perform(put(path + "/notes").header(ROLE, "FAMILY").contentType(MediaType.APPLICATION_JSON).content(notes))
+            .andExpect(status().isForbidden());
+        var shared = mvc.perform(put(path + "/notes").header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
+            .content(notes)).andExpect(status().isOk()).andReturn();
+        String revision = mapper.readTree(shared.getResponse().getContentAsString()).get("notes").get("revision").asText();
+        mvc.perform(get(SESSIONS).header(ROLE, "FAMILY"))
+            .andExpect(jsonPath("$[?(@.id == " + id + ")].notes.text", contains(text)))
+            .andExpect(jsonPath("$[?(@.id == " + id + ")].notes.revision", contains(revision)));
+        mvc.perform(put(path + "/notes").header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON).content(notes))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.notes.revision").value(revision));
+        mvc.perform(put(path + "/notes").header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"text\":\"Updated notes\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.notes.revision", not(revision)));
+        String inProgress = Instant.now().minus(1, ChronoUnit.MINUTES).toString();
+        mvc.perform(put(path).header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
+            .content(INPUT.replace("2027-01-01T15:00:00Z", inProgress)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.notes").doesNotExist());
+        mvc.perform(get(SESSIONS).header(ROLE, "FAMILY"))
+            .andExpect(jsonPath("$[?(@.id == " + id + ")].notes.text").isEmpty());
+        mvc.perform(put(path + "/notes").header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON).content(notes))
+            .andExpect(status().isConflict());
+        mvc.perform(post(path + "/cancel").header(ROLE, "TUTOR")).andExpect(status().isOk());
+        mvc.perform(put(path + "/notes").header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON).content(notes))
+            .andExpect(status().isConflict());
     }
 
     @Test

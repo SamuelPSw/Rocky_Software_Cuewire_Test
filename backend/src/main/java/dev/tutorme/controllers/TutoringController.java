@@ -60,6 +60,13 @@ public class TutoringController {
         return lessons.remind(id);
     }
 
+    @PutMapping("/sessions/{id}/notes")
+    LessonView shareNotes(@RequestHeader(value = HEADER, required = false) String role, @PathVariable long id,
+                          @RequestBody NotesInput input) {
+        DemoAccess.tutor(role);
+        return lessons.shareNotes(id, input.text());
+    }
+
     @GetMapping("/handouts")
     List<PdfInfo> handouts(@RequestHeader(value = HEADER, required = false) String role) {
         DemoAccess.read(role);

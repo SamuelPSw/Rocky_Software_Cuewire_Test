@@ -22,6 +22,13 @@ public class Lesson {
     @Column(precision = 12, scale = 2)
     public BigDecimal paid = new BigDecimal("0.00");
     public Instant remindedAt;
+    @Column(length = 5000)
+    public String notes;
+    public String notesRevision;
+
+    public boolean completedAt(Instant now) {
+        return !cancelled && !startsAt.plusSeconds(minutes * 60L).isAfter(now);
+    }
 
     public BigDecimal fee() {
         return cancelled ? new BigDecimal("0.00")

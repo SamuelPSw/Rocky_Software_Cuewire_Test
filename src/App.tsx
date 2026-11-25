@@ -8,6 +8,16 @@ const tabs = ['Overview', 'Calendar', 'Resources', 'Payments'] as const
 type Tab = typeof tabs[number]
 const money = (amount: number) => currency.format(amount)
 const message = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong.'
+const notesStorageKey = 'tutorme.read-note-revisions'
+
+function readNoteRevisions(): string[] {
+  try {
+    const revisions: unknown = JSON.parse(localStorage.getItem(notesStorageKey) ?? '[]')
+    return Array.isArray(revisions) ? revisions.filter(value => typeof value === 'string') : []
+  } catch {
+    return []
+  }
+}
 
 function App() {
   const [role, setRole] = useState<Role>('TUTOR')
@@ -21,19 +31,25 @@ function App() {
   const [notice, setNotice] = useState('')
   const [editor, setEditor] = useState<Session | 'new' | null>(null)
   const [payment, setPayment] = useState<Session | null>(null)
+  const [noteSession, setNoteSession] = useState<Session | null>(null)
+  const [readRevisions, setReadRevisions] = useState(readNoteRevisions)
+  const [now, setNow] = useState(Date.now)
   const [month, setMonth] = useState(() => new Date())
   const [selectedDay, selectDay] = useState('')
   const [pdf, setPdf] = useState<{ url: string; name: string } | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const tutor = role === 'TUTOR'
-  const modal = Boolean(editor || payment || pdf)
+  const modal = Boolean(editor || payment || pdf || noteSession)
   const totals = summarize(sessions)
   const reminders = sessions.filter(session => session.remindedAt && session.balance > 0)
   const active = sessions.filter(session => !session.cancelled)
+  const newNotes = tutor ? 0 : sessions.filter(session =>
+    session.notes && !readRevisions.includes(session.notes.revision)).length
 
   useEffect(() => {
     let generation = 0
     function refresh() {
+      setNow(Date.now())
       const current = ++generation
       Promise.all([get<Session[]>(role, '/sessions'), get<Handout[]>(role, '/handouts')])
         .then(([nextSessions, nextHandouts]) => {
@@ -46,8 +62,10 @@ function App() {
     }
     refresh()
     if (role === 'FAMILY') window.addEventListener('focus', refresh)
+    const timer = window.setInterval(role === 'FAMILY' ? refresh : () => setNow(Date.now()), 30_000)
     return () => {
       generation++
+      window.clearInterval(timer)
       window.removeEventListener('focus', refresh)
     }
   }, [role, reload])
@@ -64,6 +82,7 @@ function App() {
     setEditor(null)
     setPayment(null)
     setPdf(null)
+    setNoteSession(null)
     setError('')
   }
 
@@ -100,6 +119,29 @@ function App() {
   function openEditor(session: Session | 'new') {
     setError('')
     setEditor(session)
+  }
+
+  function openNotes(session: Session) {
+    setError('')
+    setNoteSession(session)
+    if (!tutor && session.notes && !readRevisions.includes(session.notes.revision)) {
+      const next = [...new Set([...readNoteRevisions(), ...readRevisions, session.notes.revision])]
+      setReadRevisions(next)
+      try {
+        localStorage.setItem(notesStorageKey, JSON.stringify(next))
+      } catch {
+        // Keep the badge dismissed for this visit when browser storage is unavailable.
+      }
+    }
+  }
+
+  function saveNotes(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const text = String(new FormData(event.currentTarget).get('notes')).trim()
+    void run(async () => {
+      await changeSession('/sessions/' + noteSession?.id + '/notes', 'PUT', { text })
+      setNoteSession(null)
+    }, 'Lesson notes shared with the family.')
   }
 
   function upload(event: FormEvent<HTMLFormElement>) {
@@ -149,7 +191,15 @@ function App() {
           {session.cancelled ? <span className="badge muted">Cancelled</span> :
             session.zoomUrl && <a href={session.zoomUrl} target="_blank" rel="noreferrer">Join Zoom</a>}
         </div>
+        {!tutor && session.notes && <div className="actions">
+          {!readRevisions.includes(session.notes.revision) && <span className="badge">New notes</span>}
+          <button onClick={() => openNotes(session)}>View lesson notes</button>
+        </div>}
         {tutor && !session.cancelled && <div className="actions">
+          {Date.parse(session.startsAt) + session.minutes * 60_000 <= now &&
+            <button disabled={busy} onClick={() => openNotes(session)}>
+              {session.notes ? 'Edit lesson notes' : 'Share lesson notes'}
+            </button>}
           <button disabled={busy} onClick={() => openEditor(session)}>Edit</button>
           <button disabled={busy} onClick={() => {
             if (window.confirm('Cancel ' + session.subject + '?')) {
@@ -188,7 +238,10 @@ function App() {
         </section>
         <nav aria-label="Dashboard sections">{tabs.map(item =>
           <button key={item} className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined}
-            onClick={() => { setTab(item); setError(''); setNotice('') }}>{item}</button>)}</nav>
+            onClick={() => { setTab(item); setError(''); setNotice('') }}>
+            {item}{item === 'Overview' && loaded && newNotes > 0 &&
+              <span className="badge note-count">{newNotes} new {newNotes === 1 ? 'note' : 'notes'}</span>}
+          </button>)}</nav>
         {!modal && error && <p className="feedback error" role="alert">{error}</p>}
         {!loaded && error && <button onClick={() => { setError(''); setReload(count => count + 1) }}>Retry loading</button>}
         {notice && <p className="feedback" role="status">{notice}</p>}
@@ -262,10 +315,19 @@ function App() {
       <dialog ref={dialog} onCancel={event => { event.preventDefault(); closeModal() }}
         className={pdf ? 'pdf-dialog' : ''} aria-labelledby="dialog-title">
         <div className="section-head">
-          <h2 id="dialog-title">{pdf?.name || (payment ? 'Record payment' : editor === 'new' ? 'New session' : 'Edit session')}</h2>
+          <h2 id="dialog-title">{pdf?.name || (noteSession ? 'Lesson notes' : payment ? 'Record payment' : editor === 'new' ? 'New session' : 'Edit session')}</h2>
           <button type="button" disabled={busy} onClick={closeModal} aria-label="Close dialog">×</button>
         </div>
         {modal && error && <p className="feedback error" role="alert">{error}</p>}
+        {noteSession && <>
+          <p>{noteSession.subject} · {dateTime.format(new Date(noteSession.startsAt))}</p>
+          {tutor ? <form className="notes-form" onSubmit={saveNotes}>
+            <label>Notes for the family
+              <textarea name="notes" rows={7} maxLength={5000} required defaultValue={noteSession.notes?.text} />
+            </label>
+            <button className="primary" disabled={busy}>Share with family</button>
+          </form> : <p className="lesson-notes">{noteSession.notes?.text}</p>}
+        </>}
         {editor && <form onSubmit={saveSession} key={editing?.id || 'new'}>
           <label>Subject<input name="subject" required maxLength={100} defaultValue={editing?.subject} /></label>
           <label>Start time<input name="startsAt" type="datetime-local" required defaultValue={editing ? localInput(editing.startsAt) : ''} /></label>
