@@ -1,6 +1,7 @@
 package dev.tutorme.controllers;
 
 import dev.tutorme.dto.ApiModels.*;
+import dev.tutorme.entities.Handout;
 import dev.tutorme.services.*;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
@@ -60,6 +61,34 @@ public class TutoringController {
         return lessons.remind(id);
     }
 
+    @GetMapping("/sessions/{id}/notes")
+    NoteView notes(@RequestHeader(value = HEADER, required = false) String role, @PathVariable long id) {
+        DemoAccess.read(role);
+        return lessons.notes(id, "TUTOR".equals(role));
+    }
+
+    @PutMapping("/sessions/{id}/notes")
+    NoteView saveNotes(@RequestHeader(value = HEADER, required = false) String role, @PathVariable long id,
+                       @RequestBody NoteInput input) {
+        DemoAccess.tutor(role);
+        return lessons.saveNotes(id, input.text());
+    }
+
+    @PostMapping(value = "/sessions/{id}/notes/share", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    NoteView shareNotes(@RequestHeader(value = HEADER, required = false) String role, @PathVariable long id,
+                        @RequestParam(defaultValue = "") String text,
+                        @RequestParam(required = false) MultipartFile file,
+                        @RequestParam(defaultValue = "false") boolean removePdf) throws IOException {
+        DemoAccess.tutor(role);
+        return lessons.shareNotes(id, text, file, removePdf);
+    }
+
+    @GetMapping("/sessions/{id}/notes/pdf")
+    ResponseEntity<byte[]> notePdf(@RequestHeader(value = HEADER, required = false) String role, @PathVariable long id) {
+        DemoAccess.read(role);
+        return pdfResponse(lessons.notePdf(id), true);
+    }
+
     @GetMapping("/handouts")
     List<PdfInfo> handouts(@RequestHeader(value = HEADER, required = false) String role) {
         DemoAccess.read(role);
@@ -78,7 +107,10 @@ public class TutoringController {
     ResponseEntity<byte[]> pdf(@RequestHeader(value = HEADER, required = false) String role, @PathVariable long id,
                                @RequestParam(defaultValue = "false") boolean download) {
         DemoAccess.read(role);
-        var handout = handouts.get(id);
+        return pdfResponse(handouts.get(id), download);
+    }
+
+    private ResponseEntity<byte[]> pdfResponse(Handout handout, boolean download) {
         var disposition = (download ? ContentDisposition.attachment() : ContentDisposition.inline())
             .filename(handout.name).build();
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)

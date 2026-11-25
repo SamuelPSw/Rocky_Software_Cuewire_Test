@@ -12,9 +12,15 @@ export type Session = {
   paid: number
   balance: number
   remindedAt: string | null
+  hasSharedNotes: boolean
 }
 
 export type Handout = { id: number; name: string; size: number }
+export type LessonNotes = { text: string | null; shared: boolean; pdf: Handout | null }
+
+export function sessionCompleted(session: Session, now = Date.now()) {
+  return !session.cancelled && Date.parse(session.startsAt) + session.minutes * 60000 <= now
+}
 
 export const currency = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' })
 export const dateTime = new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeStyle: 'short' })

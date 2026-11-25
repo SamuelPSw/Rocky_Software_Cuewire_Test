@@ -37,7 +37,7 @@ class LessonServiceTest {
     @Test
     void rejectsInvalidDurationBeforeSaving() {
         LessonRepository repository = mock(LessonRepository.class);
-        LessonService service = new LessonService(repository);
+        LessonService service = new LessonService(repository, mock(HandoutService.class));
         assertThrows(ResponseStatusException.class, () -> service.create(
             new LessonInput("Algebra", Instant.now(), 10, new BigDecimal("50"), null)));
         verifyNoInteractions(repository);
@@ -50,7 +50,7 @@ class LessonServiceTest {
         lesson.hourlyRate = new BigDecimal("40");
         lesson.minutes = 30;
         when(repository.findById(1L)).thenReturn(Optional.of(lesson));
-        LessonService service = new LessonService(repository);
+        LessonService service = new LessonService(repository, mock(HandoutService.class));
         assertThrows(ResponseStatusException.class, () -> service.payment(1L, new BigDecimal("20.01")));
         assertEquals(new BigDecimal("0.00"), lesson.paid);
     }

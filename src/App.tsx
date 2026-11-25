@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { calendarDays, currency, dateTime, dayKey, get, localInput, request, sessionInput, summarize } from './tutoring'
-import type { Handout, Role, Session } from './tutoring'
+import { calendarDays, currency, dateTime, dayKey, get, localInput, request, sessionCompleted, sessionInput, summarize } from './tutoring'
+import type { Handout, LessonNotes, Role, Session } from './tutoring'
 import './App.css'
 
 const tabs = ['Overview', 'Calendar', 'Resources', 'Payments'] as const
@@ -21,12 +21,13 @@ function App() {
   const [notice, setNotice] = useState('')
   const [editor, setEditor] = useState<Session | 'new' | null>(null)
   const [payment, setPayment] = useState<Session | null>(null)
+  const [notes, setNotes] = useState<{ session: Session; data: LessonNotes } | null>(null)
   const [month, setMonth] = useState(() => new Date())
   const [selectedDay, selectDay] = useState('')
   const [pdf, setPdf] = useState<{ url: string; name: string } | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const tutor = role === 'TUTOR'
-  const modal = Boolean(editor || payment || pdf)
+  const modal = Boolean(editor || payment || notes || pdf)
   const totals = summarize(sessions)
   const reminders = sessions.filter(session => session.remindedAt && session.balance > 0)
   const active = sessions.filter(session => !session.cancelled)
@@ -63,6 +64,7 @@ function App() {
     if (busy) return
     setEditor(null)
     setPayment(null)
+    setNotes(null)
     setPdf(null)
     setError('')
   }
@@ -115,9 +117,9 @@ function App() {
     }, 'PDF shared with the family.')
   }
 
-  function openPdf(handout: Handout, download: boolean) {
+  function openPdf(handout: Handout, download: boolean, path = '/handouts/' + handout.id) {
     void run(async () => {
-      const response = await request(role, '/handouts/' + handout.id + (download ? '?download=true' : ''))
+      const response = await request(role, path + (download ? '?download=true' : ''))
       const url = URL.createObjectURL(await response.blob())
       if (download) {
         const link = document.createElement('a')
@@ -129,6 +131,32 @@ function App() {
         setPdf({ url, name: handout.name })
       }
     })
+  }
+
+  function openNotes(session: Session) {
+    void run(async () => {
+      const data = await get<LessonNotes>(role, '/sessions/' + session.id + '/notes')
+      setNotes({ session, data })
+    })
+  }
+
+  function saveNotes(event: FormEvent<HTMLFormElement>, session: Session) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    const share = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'share'
+    const path = '/sessions/' + session.id + '/notes'
+    void run(async () => {
+      if (share) {
+        const file = data.get('file') as File
+        if (file.size > 5 * 1024 * 1024) throw new Error('PDFs are limited to 5 MB.')
+        if (!file.name) data.delete('file')
+        await request(role, path + '/share', 'POST', data)
+        setSessions(previous => previous.map(item => item.id === session.id ? { ...item, hasSharedNotes: true } : item))
+      } else {
+        await request(role, path, 'PUT', { text: data.get('text') })
+      }
+      setNotes(null)
+    }, share ? 'Lesson notes shared with the family.' : 'Lesson note draft saved.')
   }
 
   function moveMonth(offset: number) {
@@ -149,19 +177,24 @@ function App() {
           {session.cancelled ? <span className="badge muted">Cancelled</span> :
             session.zoomUrl && <a href={session.zoomUrl} target="_blank" rel="noreferrer">Join Zoom</a>}
         </div>
-        {tutor && !session.cancelled && <div className="actions">
-          <button disabled={busy} onClick={() => openEditor(session)}>Edit</button>
-          <button disabled={busy} onClick={() => {
-            if (window.confirm('Cancel ' + session.subject + '?')) {
-              void run(() => changeSession('/sessions/' + session.id + '/cancel', 'POST'), 'Session cancelled.')
-            }
-          }}>Cancel</button>
+        {((tutor && !session.cancelled) || (!tutor && session.hasSharedNotes)) && <div className="actions">
+          {(tutor ? sessionCompleted(session) : session.hasSharedNotes) &&
+            <button disabled={busy} onClick={() => openNotes(session)}>{tutor ? 'Lesson notes' : 'View lesson notes'}</button>}
+          {tutor && <>
+            <button disabled={busy} onClick={() => openEditor(session)}>Edit</button>
+            <button disabled={busy} onClick={() => {
+              if (window.confirm('Cancel ' + session.subject + '?')) {
+                void run(() => changeSession('/sessions/' + session.id + '/cancel', 'POST'), 'Session cancelled.')
+              }
+            }}>Cancel</button>
+          </>}
         </div>}
       </article>
     ))
   }
 
   const editing = editor === 'new' ? null : editor
+  const notesPdf = notes?.data.pdf
 
   return (
     <>
@@ -262,10 +295,31 @@ function App() {
       <dialog ref={dialog} onCancel={event => { event.preventDefault(); closeModal() }}
         className={pdf ? 'pdf-dialog' : ''} aria-labelledby="dialog-title">
         <div className="section-head">
-          <h2 id="dialog-title">{pdf?.name || (payment ? 'Record payment' : editor === 'new' ? 'New session' : 'Edit session')}</h2>
+          <h2 id="dialog-title">{pdf?.name || (notes ? 'Lesson notes' : payment ? 'Record payment' : editor === 'new' ? 'New session' : 'Edit session')}</h2>
           <button type="button" disabled={busy} onClick={closeModal} aria-label="Close dialog">×</button>
         </div>
         {modal && error && <p className="feedback error" role="alert">{error}</p>}
+        {notes && <div className="lesson-notes">
+          <p><strong>{notes.session.subject}</strong> · {dateTime.format(new Date(notes.session.startsAt))}</p>
+          {!tutor && notes.data.text && <p className="note-text">{notes.data.text}</p>}
+          {notesPdf && <button disabled={busy} onClick={() => openPdf(notesPdf, true, '/sessions/' + notes.session.id + '/notes/pdf')}>
+            Download {notesPdf.name}
+          </button>}
+          {tutor && <form onSubmit={event => saveNotes(event, notes.session)}>
+            <p className="subtle">{notes.data.shared ? 'The family can see the last shared version.' : 'Drafts are private until you share them.'}</p>
+            <label>Lesson notes<textarea name="text" rows={7} maxLength={10000} defaultValue={notes.data.text ?? ''} disabled={busy} /></label>
+            <label>{notes.data.pdf ? 'Replace shared PDF' : 'Attach a PDF when sharing'} (optional, up to 5 MB)
+              <input type="file" name="file" accept=".pdf,application/pdf" disabled={busy} />
+            </label>
+            {notes.data.pdf && <label className="note-checkbox">
+              <input type="checkbox" name="removePdf" value="true" disabled={busy} /> Remove shared PDF when sharing
+            </label>}
+            <div className="actions">
+              <button type="submit" disabled={busy}>Save draft</button>
+              <button type="submit" value="share" className="primary" disabled={busy}>Share with family</button>
+            </div>
+          </form>}
+        </div>}
         {editor && <form onSubmit={saveSession} key={editing?.id || 'new'}>
           <label>Subject<input name="subject" required maxLength={100} defaultValue={editing?.subject} /></label>
           <label>Start time<input name="startsAt" type="datetime-local" required defaultValue={editing ? localInput(editing.startsAt) : ''} /></label>

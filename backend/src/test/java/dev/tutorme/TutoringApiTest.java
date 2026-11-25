@@ -57,7 +57,7 @@ class TutoringApiTest {
         mvc.perform(post(path + "/reminder").header(ROLE, "TUTOR"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.remindedAt").isNotEmpty());
         mvc.perform(get(SESSIONS).header(ROLE, "FAMILY"))
-            .andExpect(status().isOk()).andExpect(jsonPath("$[0].remindedAt").isNotEmpty());
+            .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.id == " + id + ")].remindedAt").isNotEmpty());
         mvc.perform(post(path + "/cancel").header(ROLE, "TUTOR")).andExpect(status().isConflict());
         mvc.perform(put(path + "/payment").header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
             .content("{\"amount\":0}")).andExpect(status().isOk());
@@ -67,13 +67,73 @@ class TutoringApiTest {
     }
 
     @Test
-    void validatesPdfAndLetsFamilyReadByIdentifier() throws Exception {
-        byte[] pdf;
+    void savesPrivateDraftsAndSharesNotesAndPdfsThroughTheCompletedSession() throws Exception {
+        String completed = INPUT.replace("2027-01-01T15:00:00Z", "2020-01-01T15:00:00Z");
+        String path = SESSIONS + "/" + createSession(completed);
+        String notes = path + "/notes";
+        String future = SESSIONS + "/" + createSession(INPUT.replace("2027-", "2099-")) + "/notes";
+        String cancelled = SESSIONS + "/" + createSession(completed);
+        mvc.perform(post(cancelled + "/cancel").header(ROLE, "TUTOR")).andExpect(status().isOk());
+
+        mvc.perform(put(future).header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"text\":\"Too soon\"}")).andExpect(status().isConflict());
+        mvc.perform(multipart(cancelled + "/notes/share").param("text", "Cancelled")
+            .header(ROLE, "TUTOR")).andExpect(status().isConflict());
+        mvc.perform(put(notes).header(ROLE, "FAMILY").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"text\":\"Family edit\"}")).andExpect(status().isForbidden());
+        mvc.perform(multipart(notes + "/share").param("text", "Family edit")
+            .header(ROLE, "FAMILY")).andExpect(status().isForbidden());
+        mvc.perform(put(notes).header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"text\":\"First draft\"}")).andExpect(status().isOk());
+        mvc.perform(get(notes).header(ROLE, "TUTOR"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.text").value("First draft"));
+        mvc.perform(get(notes).header(ROLE, "FAMILY")).andExpect(status().isNotFound());
+
+        byte[] pdf = samplePdf();
+        var file = new MockMultipartFile("file", "recap.pdf", "application/pdf", pdf);
+        var shared = mvc.perform(multipart(notes + "/share").file(file).param("text", "Shared recap")
+            .header(ROLE, "TUTOR")).andExpect(status().isOk()).andReturn();
+        long pdfId = mapper.readTree(shared.getResponse().getContentAsString()).get("pdf").get("id").asLong();
+        mvc.perform(get(PDFS + "/" + pdfId).header(ROLE, "FAMILY")).andExpect(status().isNotFound());
+        mvc.perform(get(PDFS).header(ROLE, "FAMILY"))
+            .andExpect(jsonPath("$[?(@.id == " + pdfId + ")]").isEmpty());
+        mvc.perform(get(notes + "/pdf").header(ROLE, "FAMILY"))
+            .andExpect(status().isOk()).andExpect(content().bytes(pdf));
+
+        mvc.perform(put(notes).header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"text\":\"Revised draft\"}")).andExpect(status().isOk());
+        mvc.perform(get(notes).header(ROLE, "FAMILY"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.text").value("Shared recap"))
+            .andExpect(jsonPath("$.pdf.name").value("recap.pdf"));
+        var invalid = new MockMultipartFile("file", "broken.pdf", "application/pdf", new byte[1]);
+        mvc.perform(multipart(notes + "/share").file(invalid).param("text", "Unpublished")
+            .header(ROLE, "TUTOR")).andExpect(status().isBadRequest());
+        mvc.perform(get(notes).header(ROLE, "TUTOR"))
+            .andExpect(jsonPath("$.text").value("Revised draft"));
+        mvc.perform(multipart(notes + "/share").param("text", "Revised draft").param("removePdf", "true")
+            .header(ROLE, "TUTOR")).andExpect(status().isOk());
+        mvc.perform(get(notes).header(ROLE, "FAMILY"))
+            .andExpect(jsonPath("$.text").value("Revised draft")).andExpect(jsonPath("$.pdf").doesNotExist());
+        mvc.perform(get(notes + "/pdf").header(ROLE, "FAMILY")).andExpect(status().isNotFound());
+    }
+
+    private long createSession(String input) throws Exception {
+        var result = mvc.perform(post(SESSIONS).header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
+            .content(input)).andExpect(status().isCreated()).andReturn();
+        return mapper.readTree(result.getResponse().getContentAsString()).get("id").asLong();
+    }
+
+    private static byte[] samplePdf() throws Exception {
         try (var document = new PDDocument(); var output = new ByteArrayOutputStream()) {
             document.addPage(new PDPage());
             document.save(output);
-            pdf = output.toByteArray();
+            return output.toByteArray();
         }
+    }
+
+    @Test
+    void validatesPdfAndLetsFamilyReadByIdentifier() throws Exception {
+        byte[] pdf = samplePdf();
         var file = new MockMultipartFile("file", "../worksheet.pdf", "application/pdf", pdf);
         mvc.perform(multipart(PDFS).file(file).header(ROLE, "FAMILY")).andExpect(status().isForbidden());
         mvc.perform(multipart(PDFS).file(new MockMultipartFile("file", "fake.pdf", "application/pdf", new byte[1]))

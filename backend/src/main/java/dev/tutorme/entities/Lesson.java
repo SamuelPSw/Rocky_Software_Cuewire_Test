@@ -22,6 +22,20 @@ public class Lesson {
     @Column(precision = 12, scale = 2)
     public BigDecimal paid = new BigDecimal("0.00");
     public Instant remindedAt;
+    @Column(length = 10000)
+    public String noteDraft;
+    @Column(length = 10000)
+    public String sharedNote;
+    @OneToOne(fetch = FetchType.LAZY, orphanRemoval = true)
+    public Handout notePdf;
+
+    public boolean completed() {
+        return !cancelled && !startsAt.plusSeconds(minutes * 60L).isAfter(Instant.now());
+    }
+
+    public boolean hasSharedNotes() {
+        return sharedNote != null || notePdf != null;
+    }
 
     public BigDecimal fee() {
         return cancelled ? new BigDecimal("0.00")

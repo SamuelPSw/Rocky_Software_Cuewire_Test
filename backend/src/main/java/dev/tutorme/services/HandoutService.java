@@ -27,6 +27,10 @@ public class HandoutService {
     }
 
     public PdfInfo upload(MultipartFile file) throws IOException {
+        return info(store(file, null));
+    }
+
+    Handout store(MultipartFile file, Boolean lessonNote) throws IOException {
         if (file.getSize() > LIMIT) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "PDFs are limited to 5 MB.");
         }
@@ -52,12 +56,16 @@ public class HandoutService {
         handout.name = name;
         handout.size = bytes.length;
         handout.content = bytes;
-        repository.save(handout);
+        handout.lessonNote = lessonNote;
+        return repository.save(handout);
+    }
+
+    static PdfInfo info(Handout handout) {
         return new PdfInfo(handout.id, handout.name, handout.size);
     }
 
     public Handout get(long id) {
-        return repository.findById(id).orElseThrow(() ->
+        return repository.findByIdAndLessonNoteIsNull(id).orElseThrow(() ->
             new ResponseStatusException(HttpStatus.NOT_FOUND, "PDF not found."));
     }
 }
