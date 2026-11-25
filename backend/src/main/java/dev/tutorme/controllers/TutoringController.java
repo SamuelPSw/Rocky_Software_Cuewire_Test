@@ -15,10 +15,40 @@ import static dev.tutorme.services.DemoAccess.HEADER;
 public class TutoringController {
     private final LessonService lessons;
     private final HandoutService handouts;
+    private final AvailabilityService availability;
 
-    public TutoringController(LessonService lessons, HandoutService handouts) {
+    public TutoringController(LessonService lessons, HandoutService handouts, AvailabilityService availability) {
         this.lessons = lessons;
         this.handouts = handouts;
+        this.availability = availability;
+    }
+
+    @GetMapping("/availability")
+    List<AvailabilityView> availability(@RequestHeader(value = HEADER, required = false) String role) {
+        DemoAccess.read(role);
+        return availability.list();
+    }
+
+    @PostMapping("/availability")
+    @ResponseStatus(HttpStatus.CREATED)
+    AvailabilityView createAvailability(@RequestHeader(value = HEADER, required = false) String role,
+                                        @RequestBody AvailabilityInput input) {
+        DemoAccess.tutor(role);
+        return availability.create(input);
+    }
+
+    @PutMapping("/availability/{id}")
+    AvailabilityView editAvailability(@RequestHeader(value = HEADER, required = false) String role,
+                                      @PathVariable long id, @RequestBody AvailabilityInput input) {
+        DemoAccess.tutor(role);
+        return availability.edit(id, input);
+    }
+
+    @DeleteMapping("/availability/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    void removeAvailability(@RequestHeader(value = HEADER, required = false) String role, @PathVariable long id) {
+        DemoAccess.tutor(role);
+        availability.remove(id);
     }
 
     @GetMapping("/sessions")

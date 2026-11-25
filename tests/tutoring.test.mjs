@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { calendarDays, dayKey, localInput, request, sessionInput, summarize } from '../src/tutoring.ts'
+import { calendarDays, dayKey, localInput, request, sessionInput, summarize, upcomingOnWeekday } from '../src/tutoring.ts'
+
+test('weekday filtering uses local dates and excludes past and cancelled sessions', () => {
+  const sunday = { startsAt: new Date(2027, 0, 3, 23, 30).toISOString(), cancelled: false }
+  const monday = { startsAt: new Date(2027, 0, 4, 0, 30).toISOString(), cancelled: false }
+  const past = { startsAt: new Date(2026, 11, 27, 23, 30).toISOString(), cancelled: false }
+  const now = new Date(2027, 0, 3).getTime()
+  assert.deepEqual(upcomingOnWeekday([sunday, monday, past, { ...sunday, cancelled: true }], 0, now), [sunday])
+})
 
 test('calendar includes every day in February of a leap year', () => {
   const days = calendarDays(new Date(2028, 1, 1))

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { calendarDays, currency, dateTime, dayKey, get, localInput, request, sessionInput, summarize } from './tutoring'
-import type { Handout, Role, Session } from './tutoring'
+import { calendarDays, currency, dateTime, dayKey, get, localInput, request, sessionInput, summarize, upcomingOnWeekday, weekdays } from './tutoring'
+import type { Handout, Role, Session, WeeklyAvailability } from './tutoring'
 import './App.css'
 
 const tabs = ['Overview', 'Calendar', 'Resources', 'Payments'] as const
@@ -14,32 +14,39 @@ function App() {
   const [tab, setTab] = useState<Tab>('Overview')
   const [sessions, setSessions] = useState<Session[]>([])
   const [handouts, setHandouts] = useState<Handout[]>([])
+  const [availability, setAvailability] = useState<WeeklyAvailability[]>([])
   const [loaded, setLoaded] = useState(false)
   const [reload, setReload] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [editor, setEditor] = useState<Session | 'new' | null>(null)
+  const [availabilityEditor, setAvailabilityEditor] = useState<WeeklyAvailability | 'new' | null>(null)
   const [payment, setPayment] = useState<Session | null>(null)
   const [month, setMonth] = useState(() => new Date())
   const [selectedDay, selectDay] = useState('')
+  const [weekday, setWeekday] = useState('')
   const [pdf, setPdf] = useState<{ url: string; name: string } | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const tutor = role === 'TUTOR'
-  const modal = Boolean(editor || payment || pdf)
+  const modal = Boolean(editor || availabilityEditor || payment || pdf)
   const totals = summarize(sessions)
   const reminders = sessions.filter(session => session.remindedAt && session.balance > 0)
   const active = sessions.filter(session => !session.cancelled)
+  const filtered = !tutor && weekday !== '' ? upcomingOnWeekday(sessions, Number(weekday)) : null
+  const calendarSessions = filtered ?? active
 
   useEffect(() => {
     let generation = 0
     function refresh() {
       const current = ++generation
-      Promise.all([get<Session[]>(role, '/sessions'), get<Handout[]>(role, '/handouts')])
-        .then(([nextSessions, nextHandouts]) => {
+      Promise.all([get<Session[]>(role, '/sessions'), get<Handout[]>(role, '/handouts'),
+        get<WeeklyAvailability[]>(role, '/availability')])
+        .then(([nextSessions, nextHandouts, nextAvailability]) => {
           if (current !== generation) return
           setSessions(nextSessions)
           setHandouts(nextHandouts)
+          setAvailability(nextAvailability)
           setLoaded(true)
         })
         .catch(reason => { if (current === generation) setError(message(reason)) })
@@ -62,6 +69,7 @@ function App() {
   function closeModal() {
     if (busy) return
     setEditor(null)
+    setAvailabilityEditor(null)
     setPayment(null)
     setPdf(null)
     setError('')
@@ -136,8 +144,8 @@ function App() {
     selectDay('')
   }
 
-  function sessionCards(items: Session[]) {
-    return items.length === 0 ? <p className="empty">No sessions to show.</p> : items.map(session => (
+  function sessionCards(items: Session[], empty = 'No sessions to show.') {
+    return items.length === 0 ? <p className="empty">{empty}</p> : items.map(session => (
       <article className="session" key={session.id}>
         <div className="date-tile">
           <span>{new Date(session.startsAt).toLocaleString('en-CA', { month: 'short' })}</span>
@@ -162,6 +170,67 @@ function App() {
   }
 
   const editing = editor === 'new' ? null : editor
+  const editingAvailability = availabilityEditor === 'new' ? null : availabilityEditor
+  const availabilityZone = editingAvailability?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  const visibleAvailability = tutor || weekday === '' ? availability :
+    availability.filter(window => window.weekday === Number(weekday))
+  const weekdayFilter = !tutor && <label className="role weekday-filter">Filter by weekday
+    <select value={weekday} onChange={event => {
+      setWeekday(event.target.value)
+      selectDay('')
+    }}>
+      <option value="">All days</option>
+      {weekdays.map((day, index) => <option key={day} value={index}>{day}</option>)}
+    </select>
+  </label>
+
+  function saveAvailability(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    void run(async () => {
+      const path = editingAvailability ? '/availability/' + editingAvailability.id : '/availability'
+      const updated: WeeklyAvailability = await (await request(role, path, editingAvailability ? 'PUT' : 'POST', {
+        weekday: Number(data.get('weekday')),
+        startsAt: data.get('startsAt'),
+        endsAt: data.get('endsAt'),
+        timeZone: availabilityZone,
+      })).json()
+      setAvailability(previous => [...previous.filter(window => window.id !== updated.id), updated]
+        .sort((a, b) => a.weekday - b.weekday || a.startsAt.localeCompare(b.startsAt) || a.id - b.id))
+      setAvailabilityEditor(null)
+    }, 'Weekly availability saved.')
+  }
+
+  function openAvailabilityEditor(window: WeeklyAvailability | 'new') {
+    setError('')
+    setAvailabilityEditor(window)
+  }
+
+  const availabilityPanel = <section className="panel">
+    <div className="section-head"><h2>Weekly availability</h2>
+      {tutor && <button className="primary" disabled={busy} onClick={() => openAvailabilityEditor('new')}>Add time window</button>}
+    </div>
+    {visibleAvailability.length === 0 && <p className="empty">
+      {!tutor && weekday !== '' ? 'No weekly availability on this weekday.' : 'No weekly availability has been set.'}
+    </p>}
+    {visibleAvailability.map(window => <article className="session" key={window.id}>
+      <div className="session-info">
+        <h3>{weekdays[window.weekday]}</h3>
+        <p>{window.startsAt.slice(0, 5)}–{window.endsAt.slice(0, 5)} · {window.timeZone}</p>
+      </div>
+      {tutor && <div className="actions">
+        <button disabled={busy} onClick={() => openAvailabilityEditor(window)}>Edit</button>
+        <button disabled={busy} onClick={() => {
+          if (globalThis.confirm('Remove this weekly availability window?')) {
+            void run(async () => {
+              await request(role, '/availability/' + window.id, 'DELETE')
+              setAvailability(previous => previous.filter(item => item.id !== window.id))
+            }, 'Weekly availability removed.')
+          }
+        }}>Remove</button>
+      </div>}
+    </article>)}
+  </section>
 
   return (
     <>
@@ -171,6 +240,8 @@ function App() {
           <select value={role} disabled={busy || modal} onChange={event => {
             setRole(event.target.value as Role)
             setTab('Overview')
+            setWeekday('')
+            selectDay('')
             setLoaded(false)
             setError('')
             setNotice('')
@@ -193,6 +264,7 @@ function App() {
         {!loaded && error && <button onClick={() => { setError(''); setReload(count => count + 1) }}>Retry loading</button>}
         {notice && <p className="feedback" role="status">{notice}</p>}
         {!loaded && !error && <p role="status">Loading dashboard…</p>}
+        {loaded && (tab === 'Overview' || tab === 'Calendar') && weekdayFilter}
         {loaded && tab === 'Overview' && <>
           <div className="metrics">
             <article><span>Upcoming sessions</span><strong>{totals.upcoming}</strong></article>
@@ -205,9 +277,10 @@ function App() {
           </section>}
           <section className="panel">
             <div className="section-head"><h2>Session schedule</h2><button onClick={() => setTab('Calendar')}>Open calendar</button></div>
-            {sessionCards(sessions)}
+            {sessionCards(filtered ?? sessions, filtered ? 'No upcoming sessions on this weekday.' : undefined)}
           </section>
         </>}
+        {loaded && (tab === 'Calendar' || (!tutor && tab === 'Overview')) && availabilityPanel}
         {loaded && tab === 'Calendar' && <section className="panel">
           <div className="section-head">
             <h2>{month.toLocaleString('en-CA', { month: 'long', year: 'numeric' })}</h2>
@@ -215,10 +288,10 @@ function App() {
               <button aria-label="Next month" onClick={() => moveMonth(1)}>›</button></div>
           </div>
           <div className="calendar">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <span key={day} className="weekday">{day}</span>)}
+            {weekdays.map(day => <span key={day} className="weekday">{day.slice(0, 3)}</span>)}
             {calendarDays(month).map(date => {
               const key = dayKey(date)
-              const items = active.filter(session => dayKey(new Date(session.startsAt)) === key)
+              const items = calendarSessions.filter(session => dayKey(new Date(session.startsAt)) === key)
               return <button key={key} className={date.getMonth() === month.getMonth() ? 'day' : 'day adjacent'}
                 aria-pressed={selectedDay === key} aria-label={date.toLocaleDateString() + ', ' + items.length + ' sessions'}
                 onClick={() => selectDay(key)}><strong>{date.getDate()}</strong>
@@ -226,7 +299,7 @@ function App() {
             })}
           </div>
           {selectedDay && <div className="day-items"><h3>Selected day</h3>
-            {sessionCards(active.filter(session => dayKey(new Date(session.startsAt)) === selectedDay))}</div>}
+            {sessionCards(calendarSessions.filter(session => dayKey(new Date(session.startsAt)) === selectedDay))}</div>}
         </section>}
         {loaded && tab === 'Resources' && <section className="panel">
           <div className="section-head"><h2>Shared PDFs</h2></div>
@@ -262,7 +335,9 @@ function App() {
       <dialog ref={dialog} onCancel={event => { event.preventDefault(); closeModal() }}
         className={pdf ? 'pdf-dialog' : ''} aria-labelledby="dialog-title">
         <div className="section-head">
-          <h2 id="dialog-title">{pdf?.name || (payment ? 'Record payment' : editor === 'new' ? 'New session' : 'Edit session')}</h2>
+          <h2 id="dialog-title">{pdf?.name || (payment ? 'Record payment' :
+            availabilityEditor ? (editingAvailability ? 'Edit time window' : 'Add time window') :
+            editor === 'new' ? 'New session' : 'Edit session')}</h2>
           <button type="button" disabled={busy} onClick={closeModal} aria-label="Close dialog">×</button>
         </div>
         {modal && error && <p className="feedback error" role="alert">{error}</p>}
@@ -275,6 +350,19 @@ function App() {
           </div>
           <label>Zoom meeting URL (optional)<input name="zoomUrl" type="url" maxLength={500} defaultValue={editing?.zoomUrl || ''} /></label>
           <button className="primary" disabled={busy}>Save session</button>
+        </form>}
+        {availabilityEditor && <form onSubmit={saveAvailability}>
+          <label>Repeats every
+            <select name="weekday" defaultValue={editingAvailability?.weekday ?? new Date().getDay()}>
+              {weekdays.map((day, index) => <option key={day} value={index}>{day}</option>)}
+            </select>
+          </label>
+          <div className="form-row">
+            <label>Start time<input name="startsAt" type="time" required defaultValue={editingAvailability?.startsAt.slice(0, 5)} /></label>
+            <label>End time<input name="endsAt" type="time" required defaultValue={editingAvailability?.endsAt.slice(0, 5)} /></label>
+          </div>
+          <p className="subtle">Time zone · {availabilityZone}</p>
+          <button className="primary" disabled={busy}>Save availability</button>
         </form>}
         {payment && <form onSubmit={event => {
           event.preventDefault()

@@ -22,6 +22,10 @@ npm.cmd run dev
 
 Open http://localhost:5173. Vite proxies `/api` to Spring Boot on `127.0.0.1:8080`. The API seeds three fictional sessions when the database is empty. The file-backed H2 database, including uploaded PDFs, is saved under `backend/data/` when the API is run from the backend directory. Keep the working directory consistent across restarts.
 
+## Weekly availability
+
+Tutors can add, edit, or remove recurring time windows under **Calendar → Weekly availability**. Each window stays at the same local time in its published time zone. Families can use **Filter by weekday** on Overview or Calendar to find upcoming sessions and weekly windows.
+
 ## Tests and builds
 
 Run these commands from the repository root.
@@ -50,6 +54,8 @@ Spring MVC controllers handle role checks and REST responses. Services enforce b
 | `/api/sessions/{id}/cancel` | POST for Tutor |
 | `/api/sessions/{id}/payment` | PUT for Tutor with total paid to date |
 | `/api/sessions/{id}/reminder` | POST for Tutor |
+| `/api/availability` | GET for both roles, POST for Tutor |
+| `/api/availability/{id}` | PUT and DELETE for Tutor |
 | `/api/handouts` | GET for both roles, multipart POST for Tutor with a `file` part |
 | `/api/handouts/{id}` | GET for both roles, with optional `?download=true` |
 

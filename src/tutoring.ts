@@ -15,9 +15,24 @@ export type Session = {
 }
 
 export type Handout = { id: number; name: string; size: number }
+export type WeeklyAvailability = {
+  id: number
+  weekday: number
+  startsAt: string
+  endsAt: string
+  timeZone: string
+}
 
 export const currency = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' })
 export const dateTime = new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeStyle: 'short' })
+export const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
+
+export function upcomingOnWeekday(sessions: Session[], weekday: number, now = Date.now()) {
+  return sessions.filter(session => {
+    const start = new Date(session.startsAt)
+    return !session.cancelled && start.getTime() >= now && start.getDay() === weekday
+  })
+}
 
 export function calendarDays(month: Date) {
   const first = new Date(month.getFullYear(), month.getMonth(), 1)

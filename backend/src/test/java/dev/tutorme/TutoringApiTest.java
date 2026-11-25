@@ -37,6 +37,41 @@ class TutoringApiTest {
     @Autowired ObjectMapper mapper;
 
     @Test
+    void tutorManagesWeeklyAvailabilityAndFamilyCanReadIt() throws Exception {
+        String availability = "/api/availability";
+        String window = """
+            {"weekday":1,"startsAt":"15:30","endsAt":"17:00","timeZone":"America/Toronto"}
+            """;
+        mvc.perform(get(availability)).andExpect(status().isForbidden());
+        mvc.perform(post(availability).header(ROLE, "FAMILY").contentType(MediaType.APPLICATION_JSON).content(window))
+            .andExpect(status().isForbidden());
+        for (String invalid : new String[] {
+            window.replace("\"weekday\":1", "\"weekday\":7"),
+            window.replace("17:00", "15:00"),
+            window.replace("America/Toronto", "Invalid/Zone")
+        }) {
+            mvc.perform(post(availability).header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
+                .content(invalid)).andExpect(status().isBadRequest());
+        }
+
+        var created = mvc.perform(post(availability).header(ROLE, "TUTOR")
+            .contentType(MediaType.APPLICATION_JSON).content(window)).andExpect(status().isCreated())
+            .andExpect(jsonPath("$.weekday").value(1)).andReturn();
+        long id = mapper.readTree(created.getResponse().getContentAsString()).get("id").asLong();
+        String path = availability + "/" + id;
+        mvc.perform(put(path).header(ROLE, "TUTOR").contentType(MediaType.APPLICATION_JSON)
+            .content(window.replace("\"weekday\":1", "\"weekday\":3"))).andExpect(status().isOk());
+        mvc.perform(get(availability).header(ROLE, "FAMILY")).andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].weekday").value(3))
+            .andExpect(jsonPath("$[0].startsAt").value("15:30:00"))
+            .andExpect(jsonPath("$[0].timeZone").value("America/Toronto"));
+        mvc.perform(delete(path).header(ROLE, "FAMILY")).andExpect(status().isForbidden());
+        mvc.perform(delete(path).header(ROLE, "TUTOR")).andExpect(status().isNoContent());
+        mvc.perform(get(availability).header(ROLE, "FAMILY")).andExpect(status().isOk())
+            .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
     void tutorManagesSessionAndFamilySeesItsReminder() throws Exception {
         mvc.perform(get(SESSIONS)).andExpect(status().isForbidden());
         mvc.perform(post(SESSIONS).header(ROLE, "FAMILY").contentType(MediaType.APPLICATION_JSON).content(INPUT))

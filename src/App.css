@@ -51,6 +51,7 @@ nav button.selected { background: #e4ebfd; color: #21439b; }
 .subtle, .empty { margin: 9px 0 13px; }
 .calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .weekday { text-align: center; color: var(--muted); font-size: .875rem; padding: 5px 0; }
+.weekday-filter { flex-wrap: wrap; margin-bottom: 12px; }
 .day { display: flex; flex-direction: column; align-items: stretch; text-align: left; min-height: 70px; padding: 6px; gap: 4px; }
 .day.adjacent { background: #f5f7fb; color: #52627a; }
 .day[aria-pressed=true] { border-color: var(--blue); background: #eaf0fb; }
