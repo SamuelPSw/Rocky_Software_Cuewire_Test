@@ -5,7 +5,7 @@
 .brand > span:last-child { color: var(--blue); }
 .brand-mark { display: grid; place-items: center; width: 36px; height: 36px; margin-right: 10px; color: #fff; background: var(--blue); border-radius: 10px; }
 .role { display: flex; gap: 12px; align-items: center; font-size: .875rem; color: var(--muted); font-weight: 700; }
-select, input { border: 1px solid #c8d2e2; border-radius: 8px; padding: 9px 11px; color: var(--ink); background: white; min-width: 0; }
+select, input, textarea { border: 1px solid #c8d2e2; border-radius: 8px; padding: 9px 11px; color: var(--ink); background: white; min-width: 0; }
 select { padding-right: 24px; }
 .demo { background: #ebf0fd; color: #33477c; text-align: center; padding: 10px 16px; font-size: .875rem; }
 main.frame { padding: 32px 0 48px; }
@@ -68,6 +68,10 @@ dialog form .primary { justify-self: end; }
 .form-row label { min-width: 0; }
 .pdf-dialog { width: min(900px, calc(100% - 30px)); }
 .pdf-dialog iframe { display: block; width: 100%; height: 68vh; border: 1px solid var(--line); border-radius: 8px; }
+.lesson-notes { display: grid; gap: 12px; overflow-wrap: anywhere; }
+.lesson-notes textarea { resize: vertical; font: inherit; font-weight: normal; }
+.lesson-notes .note-checkbox { display: flex; align-items: center; }
+.lesson-notes .note-text { white-space: pre-wrap; }
 @media (max-width: 640px) {
   .frame { width: calc(100% - 24px); }
   main.frame { padding-top: 16px; }

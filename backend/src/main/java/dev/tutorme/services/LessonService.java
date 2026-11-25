@@ -1,13 +1,17 @@
 package dev.tutorme.services;
 
 import dev.tutorme.dto.ApiModels.*;
+import dev.tutorme.entities.Handout;
 import dev.tutorme.entities.Lesson;
+import org.hibernate.Hibernate;
 import dev.tutorme.repositories.LessonRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Instant;
@@ -18,9 +22,11 @@ import java.util.Locale;
 @Transactional
 public class LessonService {
     private final LessonRepository repository;
+    private final HandoutService handouts;
 
-    public LessonService(LessonRepository repository) {
+    public LessonService(LessonRepository repository, HandoutService handouts) {
         this.repository = repository;
+        this.handouts = handouts;
     }
 
     @Transactional(readOnly = true)
@@ -73,6 +79,60 @@ public class LessonService {
         }
         lesson.remindedAt = Instant.now();
         return view(lesson);
+    }
+
+    @Transactional(readOnly = true)
+    public NoteView notes(long id, boolean tutor) {
+        Lesson lesson = completed(id);
+        if (!tutor && !lesson.hasSharedNotes()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shared lesson notes not found.");
+        }
+        return notesView(lesson, tutor);
+    }
+
+    public NoteView saveNotes(long id, String text) {
+        Lesson lesson = completed(id);
+        lesson.noteDraft = noteText(text);
+        return notesView(lesson, true);
+    }
+
+    @Transactional(rollbackFor = IOException.class)
+    public NoteView shareNotes(long id, String text, MultipartFile file, boolean removePdf) throws IOException {
+        Lesson lesson = completed(id);
+        String note = noteText(text);
+        Handout pdf = removePdf ? null : lesson.notePdf;
+        if (file != null) {
+            pdf = handouts.store(file, true);
+        }
+        if (note == null && pdf == null) throw bad("Enter lesson notes or attach a PDF.");
+        lesson.noteDraft = note;
+        lesson.sharedNote = note;
+        lesson.notePdf = pdf;
+        return notesView(lesson, true);
+    }
+
+    @Transactional(readOnly = true)
+    public Handout notePdf(long id) {
+        Handout pdf = completed(id).notePdf;
+        if (pdf == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Lesson notes PDF not found.");
+        return Hibernate.unproxy(pdf, Handout.class);
+    }
+
+    private Lesson completed(long id) {
+        Lesson lesson = find(id);
+        if (!lesson.completed()) throw conflict("Lesson notes are available for completed sessions.");
+        return lesson;
+    }
+
+    private static String noteText(String text) {
+        if (text == null) return null;
+        if (text.length() > 10000) throw bad("Lesson notes are limited to 10,000 characters.");
+        return text.isBlank() ? null : text.strip();
+    }
+
+    private static NoteView notesView(Lesson lesson, boolean tutor) {
+        return new NoteView(tutor ? lesson.noteDraft : lesson.sharedNote, lesson.hasSharedNotes(),
+            lesson.notePdf == null ? null : HandoutService.info(Hibernate.unproxy(lesson.notePdf, Handout.class)));
     }
 
     private Lesson find(long id) {
@@ -139,7 +199,7 @@ public class LessonService {
 
     private static LessonView view(Lesson l) {
         return new LessonView(l.id, l.subject, l.startsAt, l.minutes, l.hourlyRate, l.zoomUrl,
-            l.cancelled, l.fee(), l.paid, l.balance(), l.remindedAt);
+            l.cancelled, l.fee(), l.paid, l.balance(), l.remindedAt, l.completed() && l.hasSharedNotes());
     }
 
     private static ResponseStatusException bad(String message) {

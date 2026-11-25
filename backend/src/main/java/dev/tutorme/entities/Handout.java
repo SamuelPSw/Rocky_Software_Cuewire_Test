@@ -8,6 +8,7 @@ public class Handout {
     public Long id;
     public String name;
     public long size;
+    public Boolean lessonNote;
     @Lob
     public byte[] content;
 }
